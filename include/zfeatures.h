@@ -1,395 +1,144 @@
-#ifndef TGL_ZBUFFER_H
-#define TGL_ZBUFFER_H
+#ifndef TGL_FEATURES_H
+#define TGL_FEATURES_H
+
+/* enable/disable (compile time) features in this header */
 
 /*
- * Z buffer
+ * Enables setting the error flags when there's an error, so you can check it
+ * with glGetError Disabling this has slight performance gains.
  */
-
-#include <TGL/gl.h>
-#include "zfeatures.h"
-
-#define ZB_Z_BITS 16
-
-#define ZB_POINT_Z_FRAC_BITS 14
-
-#define ZB_POINT_S_MIN ((1 << ZB_POINT_S_FRAC_BITS))
-#define ZB_POINT_S_MAX                                              \
-    ((1 << (1 + TGL_FEATURE_TEXTURE_POW2 + ZB_POINT_S_FRAC_BITS)) - \
-     ZB_POINT_S_MIN)
-#define ZB_POINT_T_MIN ((1 << ZB_POINT_T_FRAC_BITS))
-#define ZB_POINT_T_MAX                                              \
-    ((1 << (1 + TGL_FEATURE_TEXTURE_POW2 + ZB_POINT_T_FRAC_BITS)) - \
-     ZB_POINT_T_MIN)
-#define ZB_POINT_S_VALUE (ZB_POINT_S_FRAC_BITS + 4)
-#define ZB_POINT_T_VALUE (ZB_POINT_T_FRAC_BITS - 4)
-#define ZB_S_MASK ((TGL_FEATURE_TEXTURE_DIM - 1) << (ZB_POINT_S_FRAC_BITS + 1))
-#define ZB_T_MASK ((TGL_FEATURE_TEXTURE_DIM - 1) << (ZB_POINT_T_FRAC_BITS + 1))
-
-#if ZB_POINT_T_FRAC_BITS == (ZB_POINT_S_FRAC_BITS + TGL_FEATURE_TEXTURE_POW2)
-#define ST_TO_TEXTURE_BYTE_OFFSET(s, t) \
-    (((s & ZB_S_MASK) | (t & ZB_T_MASK)) >> (ZB_POINT_S_VALUE - PSZSH))
-#else
-#define ST_TO_TEXTURE_BYTE_OFFSET(s, t)                \
-    (((s & ZB_S_MASK) >> (ZB_POINT_S_VALUE - PSZSH)) | \
-     ((t & ZB_T_MASK) >> (ZB_POINT_T_VALUE - PSZSH)))
-#endif
-
-/* The corrected mult mask prevents a bug relating to color interp.
- * It is also why the color bit depth is so damn high.
- */
-#define COLOR_MULT_MASK (0xff0000)
-#define COLOR_CORRECTED_MULT_MASK (0xfe0000)
-#define COLOR_MASK (0xffffff)
-#define COLOR_MIN_MULT (0x00ffff)
-#define COLOR_SHIFT 16
-
-#define COLOR_R_GET32(r) ((r) &0xff0000)
-#define COLOR_G_GET32(g) ((g >> 8) & 0xff00)
-#define COLOR_B_GET32(b) ((b >> 16) & 0xff)
-
-#define COLOR_R_GET16(r) ((r >> 8) & 0xF800)
-#define COLOR_G_GET16(g) ((((g)) >> 13) & 0x07E0)
-#define COLOR_B_GET16(b) (((b) >> 19) & 31)
-
-#if TGL_FEATURE_RENDER_BITS == 32
-#define RGB_TO_PIXEL(r, g, b) \
-    (COLOR_R_GET32(r) | COLOR_G_GET32(g) | COLOR_B_GET32(b))
-#elif TGL_FEATURE_RENDER_BITS == 16
-#define RGB_TO_PIXEL(r, g, b) \
-    (COLOR_R_GET16(r) | COLOR_G_GET16(g) | COLOR_B_GET16(b))
-#endif
-
-/* This is how textures are sampled.
- * If you want to do some sort of fancy texture filtering.
- */
-#define TEXTURE_SAMPLE(texture, s, t) \
-    (*(PIXEL *) ((GLbyte *) texture + ST_TO_TEXTURE_BYTE_OFFSET(s, t)))
-
-/* display modes */
-#define ZB_MODE_5R6G5B 1 /* true color 16 bits */
-#define ZB_MODE_INDEX 2  /* color index 8 bits */
-#define ZB_MODE_RGBA 3   /* 32 bit ABGR mode */
-#define ZB_MODE_RGB24 4  /* 24 bit rgb mode */
-#define ZB_NB_COLORS 225 /* number of colors for 8 bit display */
-
-#define TGL_CLAMPI(imp) \
-    ((imp > 0) ? ((imp > COLOR_MASK) ? COLOR_MASK : imp) : 0)
-
-#if TGL_FEATURE_RENDER_BITS == 32
-/* 32 bit mode */
-#define GET_REDDER(p) ((p & 0xff0000))
-#define GET_GREENER(p) ((p & 0xff00) << 8)
-#define GET_BLUEER(p) ((p & 0xff) << 16)
-/*These never change, DO NOT CHANGE THESE BASED ON COLOR INTERP BIT DEPTH*/
-#define GET_RED(p) ((p >> 16) & 0xff)
-#define GET_GREEN(p) ((p >> 8) & 0xff)
-#define GET_BLUE(p) (p & 0xff)
-typedef GLuint PIXEL;
-#define PSZB 4
-#define PSZSH 5
-
-#elif TGL_FEATURE_RENDER_BITS == 16
-/* 16 bit mode */
-#define GET_REDDER(p) ((p & 0xF800) << 8)
-#define GET_GREENER(p) ((p & 0x07E0) << 13)
-#define GET_BLUEER(p) ((p & 31) << 19)
-/*DO NOT CHANGE THESE BASED ON COLOR INTERP BITDEPTH*/
-#define GET_RED(p) ((p & 0xF800) >> 8)
-#define GET_GREEN(p) ((p & 0x07E0) >> 3)
-#define GET_BLUE(p) ((p & 31) << 3)
-typedef GLushort PIXEL;
-#define PSZB 2
-#define PSZSH 4
-
-#else
-#error "wrong TGL_FEATURE_RENDER_BITS"
-#endif
-
-#if TGL_HAS(LIT_TEXTURES)
-#define RGB_MIX_FUNC(rr, gg, bb, tpix)                                       \
-    RGB_TO_PIXEL(((rr * GET_RED(tpix)) >> 8), ((gg * GET_GREEN(tpix)) >> 8), \
-                 ((bb * GET_BLUE(tpix)) >> 8))
-#else
-#define RGB_MIX_FUNC(rr, gg, bb, tpix) (tpix)
-#endif
-
-#define TGL_NO_BLEND_FUNC(source, dest) \
-    {                                   \
-        dest = source;                  \
-    }
-#define TGL_NO_BLEND_FUNC_RGB(rr, gg, bb, dest) \
-    {                                           \
-        dest = RGB_TO_PIXEL(rr, gg, bb);        \
-    }
-
-#if TGL_HAS(BLEND)
-#define TGL_BLEND_VARS              \
-    GLuint zbblendeq = zb->blendeq; \
-    GLuint sfactor = zb->sfactor;   \
-    GLuint dfactor = zb->dfactor;
-
-/* SORCERY to achieve 32 bit signed integer clamping */
-
-#define TGL_BLEND_SWITCH_CASE(sr, sg, sb, dr, dg, db, dest) \
-    switch (zbblendeq) {                                    \
-    case GL_FUNC_ADD:                                       \
-    default:                                                \
-        sr += dr;                                           \
-        sg += dg;                                           \
-        sb += db;                                           \
-        sr = TGL_CLAMPI(sr);                                \
-        sg = TGL_CLAMPI(sg);                                \
-        sb = TGL_CLAMPI(sb);                                \
-        dest = RGB_TO_PIXEL(sr, sg, sb);                    \
-        break;                                              \
-    case GL_FUNC_SUBTRACT:                                  \
-        sr -= dr;                                           \
-        sg -= dg;                                           \
-        sb -= db;                                           \
-        sr = TGL_CLAMPI(sr);                                \
-        sg = TGL_CLAMPI(sg);                                \
-        sb = TGL_CLAMPI(sb);                                \
-        dest = RGB_TO_PIXEL(sr, sg, sb);                    \
-        break;                                              \
-    case GL_FUNC_REVERSE_SUBTRACT:                          \
-        sr = dr - sr;                                       \
-        sg = dg - sg;                                       \
-        sb = db - sb;                                       \
-        sr = TGL_CLAMPI(sr);                                \
-        sg = TGL_CLAMPI(sg);                                \
-        sb = TGL_CLAMPI(sb);                                \
-        dest = RGB_TO_PIXEL(sr, sg, sb);                    \
-        break;                                              \
-    }
-
-#define TGL_BLEND_FUNC(source, dest)                            \
-    {                                                           \
-        {                                                       \
-            GLuint sr, sg, sb, dr, dg, db;                      \
-            {                                                   \
-                GLuint temp = source;                           \
-                sr = GET_REDDER(temp);                          \
-                sg = GET_GREENER(temp);                         \
-                sb = GET_BLUEER(temp);                          \
-                temp = dest;                                    \
-                dr = GET_REDDER(temp);                          \
-                dg = GET_GREENER(temp);                         \
-                db = GET_BLUEER(temp);                          \
-            }                                                   \
-            /*printf("\nShould never reach this point!");*/     \
-            switch (sfactor) {                                  \
-            case GL_ONE:                                        \
-            default:                                            \
-                break;                                          \
-            case GL_ONE_MINUS_SRC_COLOR:                        \
-                sr = ~sr & COLOR_MASK;                          \
-                sg = ~sg & COLOR_MASK;                          \
-                sb = ~sb & COLOR_MASK;                          \
-                break;                                          \
-            case GL_ZERO:                                       \
-                sr = 0;                                         \
-                sg = 0;                                         \
-                sb = 0;                                         \
-                break;                                          \
-                break;                                          \
-            }                                                   \
-            switch (dfactor) {                                  \
-            case GL_ONE:                                        \
-            default:                                            \
-                break;                                          \
-            case GL_ONE_MINUS_DST_COLOR:                        \
-                dr = ~dr & COLOR_MASK;                          \
-                dg = ~dg & COLOR_MASK;                          \
-                db = ~db & COLOR_MASK;                          \
-                break;                                          \
-            case GL_ZERO:                                       \
-                dr = 0;                                         \
-                dg = 0;                                         \
-                db = 0;                                         \
-                break;                                          \
-                break;                                          \
-            }                                                   \
-            TGL_BLEND_SWITCH_CASE(sr, sg, sb, dr, dg, db, dest) \
-        }                                                       \
-    }
-
-#define TGL_BLEND_FUNC_RGB(rr, gg, bb, dest)                    \
-    {                                                           \
-        {                                                       \
-            GLint sr = rr & COLOR_MASK, sg = gg & COLOR_MASK,   \
-                  sb = bb & COLOR_MASK, dr, dg, db;             \
-            {                                                   \
-                GLuint temp = dest;                             \
-                dr = GET_REDDER(temp);                          \
-                dg = GET_GREENER(temp);                         \
-                db = GET_BLUEER(temp);                          \
-            }                                                   \
-            /*printf("\nShould never reach this point!");*/     \
-            switch (sfactor) {                                  \
-            case GL_ONE:                                        \
-            default:                                            \
-                break;                                          \
-            case GL_ONE_MINUS_SRC_COLOR:                        \
-                sr = ~sr & COLOR_MASK;                          \
-                sg = ~sg & COLOR_MASK;                          \
-                sb = ~sb & COLOR_MASK;                          \
-                break;                                          \
-            case GL_ZERO:                                       \
-                sr = 0;                                         \
-                sg = 0;                                         \
-                sb = 0;                                         \
-                break;                                          \
-                break;                                          \
-            }                                                   \
-            switch (dfactor) {                                  \
-            case GL_ONE:                                        \
-            default:                                            \
-                break;                                          \
-            case GL_ONE_MINUS_DST_COLOR:                        \
-                dr = ~dr & COLOR_MASK;                          \
-                dg = ~dg & COLOR_MASK;                          \
-                db = ~db & COLOR_MASK;                          \
-                break;                                          \
-            case GL_ZERO:                                       \
-                dr = 0;                                         \
-                dg = 0;                                         \
-                db = 0;                                         \
-                break;                                          \
-                break;                                          \
-            }                                                   \
-            TGL_BLEND_SWITCH_CASE(sr, sg, sb, dr, dg, db, dest) \
-        }                                                       \
-    }
-
-#else
-#define TGL_BLEND_VARS
-#define TGL_BLEND_FUNC(source, dest) \
-    {                                \
-        dest = source;               \
-    }
-#define TGL_BLEND_FUNC_RGB(rr, gg, bb, dest) \
-    {                                        \
-        dest = RGB_TO_PIXEL(rr, gg, bb);     \
-    }
-#endif
-
-typedef struct {
-    GLushort *zbuf;
-    PIXEL *pbuf;
-    PIXEL *current_texture;
-
-    /* point size */
-    GLfloat pointsize;
-
-    /* OpenGL polygon stipple */
-#if TGL_HAS(POLYGON_STIPPLE)
-    GLubyte stipplepattern[TGL_POLYGON_STIPPLE_BYTES];
-    GLuint dostipple;
-#endif
-    GLenum blendeq, sfactor, dfactor;
-    GLint enable_blend;
-    GLint xsize, ysize;
-    GLint linesize; /* line size, in bytes */
-    /* depth */
-    GLint depth_test;
-    GLint depth_write;
-    GLubyte frame_buffer_allocated;
-} ZBuffer;
-
-typedef struct {
-    GLint x, y, z; /* integer coordinates in the zbuffer */
-    GLint s, t;    /* coordinates for the mapping */
-    GLint r, g, b; /* color indexes */
-
-    GLfloat sz, tz; /* temporary coordinates for mapping */
-} ZBufferPoint;
-
-/* zbuffer.c */
-
-ZBuffer *ZB_open(int xsize,
-                 int ysize,
-                 int mode,
-
-
-
-                 void *frame_buffer);
-
-void ZB_close(ZBuffer *zb);
-
-void ZB_resize(ZBuffer *zb, void *frame_buffer, GLint xsize, GLint ysize);
-void ZB_clear(ZBuffer *zb,
-              GLint clear_z,
-              GLint z,
-              GLint clear_color,
-              GLint r,
-              GLint g,
-              GLint b);
-/* linesize is in BYTES */
-void ZB_copyFrameBuffer(ZBuffer *zb, void *buf, GLint linesize);
-
-/* zdither.c */
+#define TGL_FEATURE_ERROR_CHECK 0
 
 /*
-void ZB_initDither(ZBuffer *zb,GLint nb_colors,
-           unsigned char *color_indexes,GLint *color_table);
-void ZB_closeDither(ZBuffer *zb);
-void ZB_ditherFrameBuffer(ZBuffer *zb,unsigned char *dest,
-              GLint linesize);
-*/
-/* zline.c */
+ * Strict out-of-memory checking. All OpenGL function calls are invalidated (ALL
+ * OF THEM) if a GL_OUT_OF_MEMORY error occurs. This means that TinyGL has to
+ * constantly check all gl_malloc() attempts for errors and the state of the
+ * error state variable. The checks slow down the renderer so it is not
+ * recommended , but it is in the GL spec that this should occur.
+ */
+#define TGL_FEATURE_STRICT_OOM_CHECKS 0
 
-void ZB_plot(ZBuffer *zb, ZBufferPoint *p);
-void ZB_line(ZBuffer *zb, ZBufferPoint *p1, ZBufferPoint *p2);
-void ZB_line_z(ZBuffer *zb, ZBufferPoint *p1, ZBufferPoint *p2);
-
-/* ztriangle.c */
-
-void ZB_setTexture(ZBuffer *zb, PIXEL *texture);
-
-void ZB_fillTriangleFlat(ZBuffer *zb,
-                         ZBufferPoint *p1,
-                         ZBufferPoint *p2,
-                         ZBufferPoint *p3);
-
-void ZB_fillTriangleFlatNOBLEND(ZBuffer *zb,
-                                ZBufferPoint *p1,
-                                ZBufferPoint *p2,
-                                ZBufferPoint *p3);
-
-
-void ZB_fillTriangleSmooth(ZBuffer *zb,
-                           ZBufferPoint *p1,
-                           ZBufferPoint *p2,
-                           ZBufferPoint *p3);
-
-void ZB_fillTriangleSmoothNOBLEND(ZBuffer *zb,
-                                  ZBufferPoint *p1,
-                                  ZBufferPoint *p2,
-                                  ZBufferPoint *p3);
 /*
-This function goes unused and is removed by Gek.
-void ZB_fillTriangleMapping(ZBuffer *zb,
-            ZBufferPoint *p1,ZBufferPoint *p2,ZBufferPoint *p3);
-*/
-void ZB_fillTriangleMappingPerspective(ZBuffer *zb,
-                                       ZBufferPoint *p0,
-                                       ZBufferPoint *p1,
-                                       ZBufferPoint *p2);
+ * Swap between using the inline'd malloc(), calloc(), and free() in zbuffer.h,
+ * or a replacement gl_malloc(), gl_zalloc(), and gl_free() in memory.c
+ */
+#define TGL_FEATURE_CUSTOM_MALLOC 0
 
+/*
+ * Use Fast Inverse Square Root. Toggleable because it is actually slower on
+ * some platforms, And because some systems may have float types which are
+ * incompatible with it.
+ */
+#define TGL_FEATURE_FISR 0
 
-void ZB_fillTriangleMappingPerspectiveNOBLEND(ZBuffer *zb,
-                                              ZBufferPoint *p0,
-                                              ZBufferPoint *p1,
-                                              ZBufferPoint *p2);
+#define TGL_FEATURE_ARRAYS 1
 
-typedef void (*ZB_fillTriangleFunc)(ZBuffer *,
-                                    ZBufferPoint *,
-                                    ZBufferPoint *,
-                                    ZBufferPoint *);
+#define TGL_FEATURE_DISPLAYLISTS 1
 
-/* memory.c */
-extern void gl_free(void *p);
-extern void *gl_malloc(GLint size);
-extern void *gl_zalloc(GLint size);
+#define TGL_FEATURE_LIT_TEXTURES 1
+/* Enable the patternized "discard"-ing of pixels.*/
+#define TGL_FEATURE_POLYGON_STIPPLE 0
+/* Enable the use of GL_SELECT and GL_FEEDBACK*/
+#define TGL_FEATURE_ALT_RENDERMODES 0
 
-#endif /* TGL_ZBUFFER_H */
+/*
+ * Enable the rendering of large polygons (in terms of vertex count)
+ * Also enabled the rendering of line loops.
+ * the maximum number of vertices in a polygon is defined in zgl.h
+ */
+#define TGL_FEATURE_GL_POLYGON 0
+
+#define TGL_FEATURE_BLEND 1
+
+#define TGL_FEATURE_BLEND_DRAW_PIXELS 0
+/* The width of textures as a power of 2. The default is 8, or 256x256
+ * textures
+ */
+#define TGL_FEATURE_TEXTURE_POW2 8
+#define TGL_FEATURE_TEXTURE_DIM (1 << TGL_FEATURE_TEXTURE_POW2)
+
+/* A stipple pattern is 128 bytes in size. */
+#define TGL_POLYGON_STIPPLE_BYTES 128
+/* A stipple pattern is 2^5 (32) bits wide. */
+#define TGL_POLYGON_STIPPLE_POW2_WIDTH 5
+#define TGL_POLYGON_STIPPLE_MASK_X 31
+#define TGL_POLYGON_STIPPLE_MASK_Y 31
+
+/* Use lookup tables for calculating specular light. */
+#define TGL_FEATURE_SPECULAR_BUFFERS 0
+
+/* Prevent ZB_copyFrameBuffer from copying certain colors. */
+#define TGL_FEATURE_NO_COPY_COLOR 0
+/* Don't draw (texture mapped) pixels whose color is the NO_DRAW_COLOR */
+#define TGL_FEATURE_NO_DRAW_COLOR 0
+/* Regardless of the current clear color, always clear using the NO_COPY_COLOR
+ */
+#define TGL_FEATURE_FORCE_CLEAR_NO_COPY_COLOR 0
+#define TGL_NO_COPY_COLOR 0xff00ff
+#define TGL_NO_DRAW_COLOR 0xff00ff
+/* solid debug pink.*/
+#define TGL_COLOR_MASK 0x00ffffff
+/* mask to check for while drawing/copying.*/
+
+#define TGL_FEATURE_MULTITHREADED_DRAWPIXELS 1
+
+#define TGL_FEATURE_MULTITHREADED_COPY_TEXIMAGE_2D 1
+
+#define TGL_FEATURE_MULTITHREADED_ZB_COPYBUFFER 0
+
+/*
+ * TGL_FEATURE_ALIGNAS assumes that the implementation's malloc (AND REALLOC)
+ * are 16-byte aligned.
+ *
+ * Disabled by default for compatibility- you should only enable this if you
+ * KNOW that the target ALWAYS returns 16-byte aligned pointers.
+ */
+#define TGL_FEATURE_ALIGNAS 0
+
+/*
+ * Optimization hint- cost of branching.
+ * 0 - branching has zero cost, avoid extraneous code.
+ * 1 - Branching has some cost, allow some extraneous code
+ * 2 - Branching has extreme cost, allow a lot of extraneous code. Modern
+ * processors work best on this setting.
+ */
+#define TGL_OPTIMIZATION_HINT_BRANCH_COST 2
+
+#ifdef __TINYC__
+#undef TGL_FEATURE_ALIGNAS
+#define TGL_FEATURE_ALIGNAS 0
+#endif
+
+#if TGL_FEATURE_ALIGNAS == 1
+#include <stdalign.h>
+#define TGL_ALIGN alignas(16)
+#else
+#define TGL_ALIGN
+#endif
+
+#define TGL_FEATURE_16_BITS 0
+#define TGL_FEATURE_32_BITS 1
+
+#if TGL_FEATURE_32_BITS == 1
+#define TGL_FEATURE_RENDER_BITS 32
+#elif TGL_FEATURE_16_BITS == 1
+#define TGL_FEATURE_RENDER_BITS 16
+#else
+#error "Unsupported TGL_FEATURE_XX_BITS"
+#endif
+
+/* The fraction bits in the fixed point values used for S and T in
+ * interpolatiion.
+ */
+#define ZB_POINT_S_FRAC_BITS 10
+#define ZB_POINT_T_FRAC_BITS (ZB_POINT_S_FRAC_BITS + TGL_FEATURE_TEXTURE_POW2)
+
+/* Test the compatibility of the target platform at glInit() time. */
+#define TGL_FEATURE_TINYGL_RUNTIME_COMPAT_TEST 1
+
+#define TINYGL_VERSION 1.0
+
+/* Feature test macro */
+#define TGL_HAS(x) TGL_FEATURE_##x
+
+#endif
